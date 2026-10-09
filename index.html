@@ -16,6 +16,8 @@ textarea{width:100%;min-height:110px}
 main{max-width:960px;margin:0 auto;padding:14px}
 .c{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin:12px 0}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sc{overflow-x:auto}
+.deliverable-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0}
+.deliverable-count{white-space:nowrap}
 table{width:100%;border-collapse:collapse;min-width:540px}th,td{text-align:left;padding:7px;border-bottom:1px solid var(--line)}
 .bar{height:8px;background:var(--line);border-radius:9px;overflow:hidden}.bar i{display:block;height:100%;background:var(--b1)}
 .t{font-size:.75rem;padding:2px 8px;border-radius:99px;background:var(--line)}.done{background:var(--ok);color:#fff}.od{color:var(--bad);font-weight:600}
@@ -81,6 +83,7 @@ const me=id=>db.users.find(u=>u.id===id)||{name:"(removed)",dept:""};
 const mem=d=>db.users.filter(x=>x.role==="member"&&x.dept===d);
 const vis=()=>{const u=S.user;return db.tasks.filter(t=>u.role==="admin"||(u.role==="head"?t.dept===u.dept:t.as===u.id))};
 const pct=a=>a.length?Math.round(a.filter(t=>t.status==="done").length*100/a.length):0;
+const deliverables=d=>{const tasks=db.tasks.filter(t=>t.dept===d);return {completed:tasks.filter(t=>t.status==="done").length,total:tasks.length}};
 const od=t=>t.status!=="done"&&t.due<today;
 const roleOf=u=>u.role==="admin"?"Admin":u.role==="head"?"Head, "+u.dept:"Member, "+u.dept;
 function login(){const l=S.lock>Date.now();
@@ -98,15 +101,15 @@ return add+`<div class="c sc"><table><tr><th>Task</th><th>Assignee</th><th>Due</
 function dashV(){const u=S.user,L=vis(),ds=u.role==="admin"?D:[u.dept];
 const k=`<div class="c k"><div><b>${pct(L)}%</b>Complete</div><div><b>${L.length}</b>Tasks</div><div><b>${L.filter(od).length}</b>Overdue</div><div><b>${L.filter(t=>t.status==="review").length}</b>In review</div></div>`;
 if(u.role==="member")return `<h3>My Portal</h3>`+k+`<h3>My tasks</h3>`+tasksV();
-return k+ds.map(d=>{const p=pct(db.tasks.filter(t=>t.dept===d));return `<div class="c"><div class="row"><b style="flex:1">${esc(d)}</b><span>${p}%</span></div><div class="bar"><i style="width:${p}%"></i></div>`+db.outs.filter(o=>o.dept===d).map(o=>`<p class="row">${esc(o.title)}: <b>${o.cur}/${o.target}</b> <input type="number" min="0" max="9999" value="${o.cur}" data-a="out" data-id="${o.id}" style="width:80px"></p>`).join("")+`</div>`}).join("")}
+return k+ds.map(d=>{const tasks=db.tasks.filter(t=>t.dept===d),p=pct(tasks),output=deliverables(d);return `<div class="c"><div class="row"><b style="flex:1">${esc(d)}</b><span>${p}%</span></div><div class="bar"><i style="width:${p}%"></i></div><div class="deliverable-row"><span>Key deliverables completed:</span><b class="deliverable-count">${output.completed} / ${output.total}</b></div></div>`}).join("")}
 function postV(){const u=S.user,P=db.posts.filter(p=>u.role==="admin"||(u.role==="head"?p.dept===u.dept:p.by===u.id)).sort((a,b)=>b.ts-a.ts);
 return `<div class="c"><b>Write today's feedback</b><form data-f="post" style="margin-top:8px"><input name="title" placeholder="Title" required maxlength="100" style="width:100%;margin-bottom:6px"><textarea name="body" placeholder="What did you work on today? Challenges, wins, plans for tomorrow..." required maxlength="3000"></textarea><button class="p">Publish</button></form></div><h3>${u.role==="member"?"My posts":"Team feedback"}</h3>`+(P.map(p=>`<div class="c"><b>${esc(p.title)}</b><div class="mut">${esc(me(p.by).name)} · ${esc(p.dept||"Admin")} · ${new Date(p.ts).toLocaleString("en-IN")}</div><p style="white-space:pre-wrap">${esc(p.body)}</p>${p.by===u.id||u.role==="admin"?`<button data-a="delpost" data-id="${p.id}">Delete</button>`:""}</div>`).join("")||`<p class="mut">No posts yet.</p>`)}
 function teamV(){const u=S.user,L=db.users.filter(x=>u.role==="admin"||(x.dept===u.dept&&x.role==="member"));
 return `<div class="c"><b>Add a member</b><form data-f="member" class="row" style="margin-top:8px"><input name="name" placeholder="Full name" required maxlength="60"><input name="id" placeholder="User ID (a-z, 0-9, .)" required pattern="[a-z0-9._]{3,20}"><input name="pw" placeholder="Password (min 6)" required minlength="6" maxlength="40">${u.role==="admin"?`<select name="dept">${D.map(d=>`<option>${esc(d)}</option>`).join("")}</select>`:""}<button class="p">Add</button></form><div class="err">${esc(S.msg)}</div></div><div class="c sc"><table><tr><th>Name</th><th>User ID</th><th>Role</th></tr>${L.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.id)}</td><td>${esc(roleOf(x))}</td></tr>`).join("")}</table></div>`}
 function repV(){const u=S.user,ds=u.role==="admin"?D:[u.dept];let tx=`TECHTRIX 2026 PROGRESS REPORT (${today})\n`;
-const body=ds.map(d=>{const dl=db.tasks.filter(t=>t.dept===d);tx+=`\n${d}: ${pct(dl)}% done, ${dl.filter(od).length} overdue\n`;
+const body=ds.map(d=>{const dl=db.tasks.filter(t=>t.dept===d),output=deliverables(d);tx+=`\n${d}: ${pct(dl)}% done, ${dl.filter(od).length} overdue\n`;
 const rows=mem(d).map(m=>{const x=dl.filter(t=>t.as===m.id),f=db.posts.filter(p=>p.by===m.id).length;tx+=`  - ${m.name}: ${x.filter(t=>t.status==="done").length}/${x.length} done, ${f} feedback posts\n`;return `<tr><td>${esc(m.name)}</td><td>${x.length}</td><td>${x.filter(t=>t.status==="done").length}</td><td>${x.filter(od).length}</td><td>${f}</td></tr>`}).join("");
-db.outs.filter(o=>o.dept===d).forEach(o=>tx+=`  Output - ${o.title}: ${o.cur}/${o.target}\n`);
+tx+=`  Key deliverables completed: ${output.completed}/${output.total} tasks\n`;
 return `<div class="c sc"><b>${esc(d)}</b> <span class="mut">${pct(dl)}% complete</span><table><tr><th>Member</th><th>Assigned</th><th>Done</th><th>Overdue</th><th>Posts</th></tr>${rows||"<tr><td colspan=5>No members</td></tr>"}</table></div>`}).join("");S.rep=tx;
 return `<div class="row"><button class="p" data-a="copy">Copy report text</button><span class="mut" id="cm"></span></div>`+body}
 function app(){const u=S.user,A=document.getElementById("app");if(!u){A.innerHTML=login();return}
@@ -128,10 +131,9 @@ if(a==="mv"){const t=db.tasks.find(t=>t.id==b.dataset.id),s=b.dataset.s;if(t&&(t
 if(a==="delpost"){const p=db.posts.find(p=>p.id==b.dataset.id);if(p&&(p.by===u.id||u.role==="admin")){db.posts=db.posts.filter(x=>x!==p);save()}}
 if(a==="copy"){try{await navigator.clipboard.writeText(S.rep);document.getElementById("cm").textContent="Copied."}catch(x){document.getElementById("cm").textContent="Copy blocked by browser."}return}
 app()});
-document.addEventListener("change",e=>{const el=e.target,u=S.user;if(!u)return;
-if(el.dataset.a==="assign"){const t=db.tasks.find(t=>t.id==el.dataset.id),m=db.users.find(x=>x.id===el.value);if(t&&m&&m.dept===t.dept&&(u.role==="admin"||u.dept===t.dept)){t.as=m.id;save()}}
-if(el.dataset.a==="out"){const o=db.outs.find(o=>o.id==el.dataset.id);if(o&&u.role!=="member"&&(u.role==="admin"||u.dept===o.dept)){o.cur=Math.max(0,+el.value||0);save()}}
-app()});
+document.addEventListener("change",e=>{const el=e.target,u=S.user;if(!u)return;let changed=false;
+if(el.dataset.a==="assign"){const t=db.tasks.find(t=>t.id==el.dataset.id),m=db.users.find(x=>x.id===el.value);if(t&&m&&m.dept===t.dept&&(u.role==="admin"||u.dept===t.dept)){t.as=m.id;save();changed=true}}
+if(changed)app()});
 (async()=>{
   if(sb){
     await loadRemote();
