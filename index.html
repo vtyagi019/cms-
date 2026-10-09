@@ -143,6 +143,9 @@ app()});
       save();
     }
   }
+  // Hash any plaintext passwords (local/demo seed data) so login's SHA-256
+  // comparison succeeds and plaintext is never synced back to Supabase.
+  for(const u of db.users) if(!/^[0-9a-f]{64}$/.test(u.pw||"")) u.pw=await hashPassword(u.pw);
   app();
 })();
 </script></body></html>

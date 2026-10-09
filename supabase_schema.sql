@@ -79,6 +79,19 @@ alter table portal_tasks enable row level security;
 alter table portal_outputs enable row level security;
 alter table portal_posts enable row level security;
 
+-- PostgreSQL has no CREATE POLICY IF NOT EXISTS. Drop these named demo
+-- policies first so this setup script can be safely rerun.
+drop policy if exists "demo read users" on portal_users;
+drop policy if exists "demo insert users" on portal_users;
+drop policy if exists "demo read tasks" on portal_tasks;
+drop policy if exists "demo insert tasks" on portal_tasks;
+drop policy if exists "demo update tasks" on portal_tasks;
+drop policy if exists "demo read outputs" on portal_outputs;
+drop policy if exists "demo update outputs" on portal_outputs;
+drop policy if exists "demo read posts" on portal_posts;
+drop policy if exists "demo insert posts" on portal_posts;
+drop policy if exists "demo delete posts" on portal_posts;
+
 create policy "demo read users" on portal_users for select using (true);
 create policy "demo insert users" on portal_users for insert with check (true);
 create policy "demo read tasks" on portal_tasks for select using (true);

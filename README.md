@@ -4,8 +4,8 @@ This folder converts the supplied **Techtrix 2026 Portal | E-Cell** from browser
 
 ## Folder contents
 
-- `Techtrix_2026_Portal_Supabase.html` — Supabase-connected version of the portal.
-- `Techtrix_2026_Portal_Local_Backup.html` — original uploaded HTML kept unchanged as a backup.
+- `index.html` — Supabase-connected version of the portal.
+- `backup/Techtrix_2026_Portal_Local_Backup.html` — original uploaded HTML kept unchanged as a backup.
 - `supabase_schema.sql` — creates the database tables, indexes, seed users, seed outputs/tasks, and demo RLS policies.
 - `README.md` — setup instructions.
 
@@ -27,7 +27,7 @@ Never put the `service_role`/secret key into the HTML file.
 
 ## 3. Configure the HTML
 
-Open `Techtrix_2026_Portal_Supabase.html` and find:
+Open `index.html` and find:
 
 ```js
 const SUPABASE_URL = "PASTE_YOUR_SUPABASE_URL_HERE";
@@ -50,7 +50,7 @@ python -m http.server 5500
 
 Then open:
 
-`http://localhost:5500/Techtrix_2026_Portal_Supabase.html`
+`http://localhost:5500/index.html`
 
 ### Option B — VS Code Live Server
 
