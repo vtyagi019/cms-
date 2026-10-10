@@ -83,24 +83,32 @@ alter table portal_posts enable row level security;
 -- policies first so this setup script can be safely rerun.
 drop policy if exists "demo read users" on portal_users;
 drop policy if exists "demo insert users" on portal_users;
+drop policy if exists "demo update users" on portal_users;
 drop policy if exists "demo read tasks" on portal_tasks;
 drop policy if exists "demo insert tasks" on portal_tasks;
 drop policy if exists "demo update tasks" on portal_tasks;
 drop policy if exists "demo read outputs" on portal_outputs;
+drop policy if exists "demo insert outputs" on portal_outputs;
 drop policy if exists "demo update outputs" on portal_outputs;
 drop policy if exists "demo read posts" on portal_posts;
 drop policy if exists "demo insert posts" on portal_posts;
+drop policy if exists "demo update posts" on portal_posts;
 drop policy if exists "demo delete posts" on portal_posts;
 
+-- NOTE: the portal saves via upsert (INSERT ... ON CONFLICT DO UPDATE), which
+-- under RLS requires SELECT + INSERT + UPDATE policies on every table it writes.
 create policy "demo read users" on portal_users for select using (true);
 create policy "demo insert users" on portal_users for insert with check (true);
+create policy "demo update users" on portal_users for update using (true) with check (true);
 create policy "demo read tasks" on portal_tasks for select using (true);
 create policy "demo insert tasks" on portal_tasks for insert with check (true);
 create policy "demo update tasks" on portal_tasks for update using (true) with check (true);
 create policy "demo read outputs" on portal_outputs for select using (true);
+create policy "demo insert outputs" on portal_outputs for insert with check (true);
 create policy "demo update outputs" on portal_outputs for update using (true) with check (true);
 create policy "demo read posts" on portal_posts for select using (true);
 create policy "demo insert posts" on portal_posts for insert with check (true);
+create policy "demo update posts" on portal_posts for update using (true) with check (true);
 create policy "demo delete posts" on portal_posts for delete using (true);
 
 -- SECURITY NOTE:
