@@ -145,6 +145,15 @@ alter table portal_users drop column if exists password_hash;
 -- 2. ROLE HELPERS + ROLE-BASED RLS
 -- ============================================================================
 
+-- Defense in depth: ensure RLS is on for every exposed table (no-op when
+-- supabase_schema.sql already enabled it). Note the real table names —
+-- there is no public.tasks or public.feedback; they are portal_tasks and
+-- portal_posts.
+alter table portal_users  enable row level security;
+alter table portal_tasks  enable row level security;
+alter table portal_outputs enable row level security;
+alter table portal_posts  enable row level security;
+
 create or replace function portal_role() returns text
   language sql stable security definer set search_path=public as $$
   select role from portal_users where auth_id = auth.uid() $$;
