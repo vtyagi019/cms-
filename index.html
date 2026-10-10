@@ -81,7 +81,7 @@ const loadRemote=async()=>{
   };
 };
 const connectRemote=async()=>{
-  S.ready=false;S.connectionError=false;S.msg="Connecting to Supabase...";app();
+  S.ready=false;S.connectionError=false;S.msg="";app();
   try{
     const {data:{session}}=await sb.auth.getSession();
     if(session){
@@ -125,7 +125,7 @@ const rows=mem(d).map(m=>{const x=dl.filter(t=>t.as===m.id),f=db.posts.filter(p=
 tx+=`  Key deliverables completed: ${output.completed}/${output.total} tasks\n`;
 return `<div class="c sc"><b>${esc(d)}</b> <span class="mut">${pct(dl)}% complete</span><table><tr><th>Member</th><th>Assigned</th><th>Done</th><th>Overdue</th><th>Posts</th></tr>${rows||"<tr><td colspan=5>No members</td></tr>"}</table></div>`}).join("");S.rep=tx;
 return `<div class="row"><button class="p" data-a="copy">Copy report text</button><span class="mut" id="cm"></span></div>`+body}
-function app(){const u=S.user,A=document.getElementById("app");if(S.connectionError){A.innerHTML=`<main class="lg"><h2>Supabase connection required</h2><p class="err">${esc(S.msg)}</p><button class="p" data-a="retry">Retry connection</button></main>`;return}if(!S.ready){A.innerHTML=`<main class="lg"><p class="mut">${esc(S.msg||"Connecting to Supabase...")}</p></main>`;return}if(!u){A.innerHTML=login();return}
+function app(){const u=S.user,A=document.getElementById("app");if(S.connectionError){A.innerHTML=`<main class="lg"><h2>Supabase connection required</h2><p class="err">${esc(S.msg)}</p><button class="p" data-a="retry">Retry connection</button></main>`;return}if(!S.ready){A.innerHTML=`<main class="lg"><img src="${LOGO}" alt="" style="width:64px;opacity:.4"></main>`;return}if(!u){A.innerHTML=login();return}
 const tabs=u.role==="member"?[["dash","My Portal"],["post","Daily Feedback"]]:[["dash","Dashboard"],["tasks","Tasks"],["post","Feedback"],["team","Team"],["rep","Report"]];
 if(!tabs.some(t=>t[0]===S.view))S.view="dash";
 const v={dash:dashV,tasks:tasksV,post:postV,team:teamV,rep:repV}[S.view]();
