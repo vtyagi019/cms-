@@ -44,7 +44,11 @@ const U0=[["admin1","Mr. Sudhanshu Ranjan","admin","","Sr#4827"],["admin2","Anik
 const day=n=>new Date(Date.now()+n*864e5).toISOString().slice(0,10),today=day(0);
 const SL={todo:"To Do",prog:"In Progress",review:"In Review",done:"Done"};
 let db={users:U0.map(([id,name,role,dept,pw])=>({id,name,role,dept,pw})),tasks:[{id:1,title:"Design Techtrix 2026 poster",dept:"Creative",as:"member.demo",due:day(4),status:"prog",pri:"High"},{id:2,title:"Prepare social media banners",dept:"Creative",as:"member.demo",due:day(-1),status:"todo",pri:"Med"}],outs:D.map((d,i)=>({id:i+1,dept:d,title:"Key deliverables completed",target:10,cur:0})),posts:[]};
-let S={user:null,view:"dash",fails:0,lock:0,msg:"",rep:""};
+let S={user:null,view:"dash",msg:"",rep:""};
+const LOGIN_LIMIT=4,LOGIN_LOCK_MS=30*60*1000;
+const loginKey=id=>`techtrix-login:${id}`;
+const loginState=id=>{try{return JSON.parse(localStorage.getItem(loginKey(id))||'{"fails":0,"until":0}')}catch{return {fails:0,until:0}}};
+const setLoginState=(id,state)=>{try{localStorage.setItem(loginKey(id),JSON.stringify(state))}catch{}};
 let saveTimer=null;
 const save=()=>{
   if(!sb) return;
@@ -86,8 +90,8 @@ const pct=a=>a.length?Math.round(a.filter(t=>t.status==="done").length*100/a.len
 const deliverables=d=>{const tasks=db.tasks.filter(t=>t.dept===d);return {completed:tasks.filter(t=>t.status==="done").length,total:tasks.length}};
 const od=t=>t.status!=="done"&&t.due<today;
 const roleOf=u=>u.role==="admin"?"Admin":u.role==="head"?"Head, "+u.dept:"Member, "+u.dept;
-function login(){const l=S.lock>Date.now();
-return `<div class="lg"><img src="${LOGO}" alt="E-Cell"><h2 style="color:var(--b1);margin:6px 0">Techtrix 2026</h2><p class="mut">Tracking portal. Sign in with your ID.</p><div class="c"><form data-f="login"><input name="id" placeholder="User ID" autocomplete="username" required><input name="pw" type="password" placeholder="Password" autocomplete="current-password" required><div class="err">${l?"Too many attempts. Wait 30 seconds.":esc(S.msg)}</div><button class="p" ${l?"disabled":""}>Sign in</button></form></div></div>`}
+function login(){const id=(document.querySelector('[name="id"]')?.value||"").trim().toLowerCase(),locked=id&&loginState(id).until>Date.now();
+return `<div class="lg"><img src="${LOGO}" alt="E-Cell"><h2 style="color:var(--b1);margin:6px 0">Techtrix 2026</h2><p class="mut">Sign in with your user ID.</p><div class="c"><form data-f="login"><input name="id" placeholder="User ID" autocomplete="username" required><input name="pw" type="password" placeholder="Password" autocomplete="current-password" required><div class="err">${locked?"Access blocked for 30 minutes after 4 failed attempts. Contact an administrator for help.":esc(S.msg)}</div><button class="p" ${locked?"disabled":""}>Sign in</button></form></div></div>`}
 function act(t){const u=S.user,own=t.as===u.id,lead=u.role!=="member",s=t.status,d=`data-a="mv" data-id="${t.id}"`;let b="";
 if((own||lead)&&s==="todo")b=`<button ${d} data-s="prog">Start</button>`;
 if((own||lead)&&s==="prog")b=`<button ${d} data-s="review">Submit for review</button>`;
@@ -118,11 +122,25 @@ if(!tabs.some(t=>t[0]===S.view))S.view="dash";
 const v={dash:dashV,tasks:tasksV,post:postV,team:teamV,rep:repV}[S.view]();
 A.innerHTML=`<header><img src="${LOGO}" alt="E-Cell"><b>Techtrix 2026</b>${tabs.map(([k,n])=>`<button data-a="nav" data-v="${k}" class="${S.view===k?"on":""}">${n}</button>`).join("")}<button data-a="out2">Sign out</button></header><main><p class="mut">Welcome, <b>${esc(u.name)}</b> (${esc(roleOf(u))})</p>${v}</main>`}
 document.addEventListener("submit",async e=>{e.preventDefault();const f=e.target,d=Object.fromEntries(new FormData(f)),u=S.user,k=f.dataset.f;S.msg="";
-if(k==="login"){const x=db.users.find(x=>x.id===d.id.trim());const hp=await hashPassword(d.pw);if(x&&x.pw===hp){S.user=x;S.fails=0;S.view="dash"}else{S.msg="Invalid ID or password.";if(++S.fails>=5){S.lock=Date.now()+3e4;S.fails=0;setTimeout(app,30500)}}}
+if(k==="login"){
+  const id=String(d.id||"").trim().toLowerCase(),state=loginState(id);
+  if(state.until>Date.now()) S.msg="Access blocked for 30 minutes after 4 failed attempts. Contact an administrator for help.";
+  else {
+    if(state.until){state.fails=0;state.until=0}
+    const x=db.users.find(x=>String(x.id).trim().toLowerCase()===id),hp=await hashPassword(d.pw);
+    if(x&&String(x.pw||"").toLowerCase()===hp){S.user=x;S.view="dash";localStorage.removeItem(loginKey(id))}
+    else {
+      state.fails=(state.fails||0)+1;
+      if(state.fails>=LOGIN_LIMIT){state.fails=LOGIN_LIMIT;state.until=Date.now()+LOGIN_LOCK_MS;S.msg="Access blocked for 30 minutes after 4 failed attempts. Contact an administrator for help."}
+      else S.msg=`Invalid user ID or password. ${LOGIN_LIMIT-state.fails} attempt${LOGIN_LIMIT-state.fails===1?"":"s"} remaining.`;
+      setLoginState(id,state);
+    }
+  }
+}
 if(k==="task"&&u.role!=="member"){const a=db.users.find(x=>x.id===d.as&&x.role==="member");if(a&&(u.role==="admin"||a.dept===u.dept)){db.tasks.push({id:Date.now(),title:d.title.trim().slice(0,120),dept:a.dept,as:a.id,due:d.due,status:"todo",pri:d.pri});save()}}
 if(k==="post"&&d.title.trim()&&d.body.trim()){db.posts.push({id:Date.now(),by:u.id,dept:u.dept,title:d.title.trim().slice(0,100),body:d.body.trim().slice(0,3000),ts:Date.now()});save()}
 if(k==="member"&&u.role!=="member"){const dept=u.role==="admin"?d.dept:u.dept,id=d.id.trim();
-if(!/^[a-z0-9._]{3,20}$/.test(id)||!D.includes(dept))S.msg="Invalid ID or department.";else if(db.users.some(x=>x.id===id))S.msg="That User ID already exists.";else{db.users.push({id,name:d.name.trim().slice(0,60),role:"member",dept,pw:await hashPassword(d.pw)});save()}}
+if(!/^[a-z0-9._]{3,20}$/.test(id)||!D.includes(dept))S.msg="Invalid ID or department.";else if(db.users.some(x=>String(x.id).toLowerCase()===id.toLowerCase()))S.msg="That User ID already exists.";else{db.users.push({id,name:d.name.trim().slice(0,60),role:"member",dept,pw:await hashPassword(d.pw)});save()}}
 app()});
 document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]");if(!b||b.tagName==="SELECT"||b.tagName==="INPUT")return;const a=b.dataset.a,u=S.user;S.msg="";
 if(a==="nav")S.view=b.dataset.v;
