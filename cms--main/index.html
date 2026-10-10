@@ -43,18 +43,31 @@ const day=n=>new Date(Date.now()+n*864e5).toISOString().slice(0,10),today=day(0)
 const SL={todo:"To Do",prog:"In Progress",review:"In Review",done:"Done"};
 let db={users:[],tasks:[],outs:[],posts:[]};
 let S={user:null,view:"dash",msg:"",rep:"",ready:false,connectionError:false};
-const save=async()=>{
-  if(!sb) throw new Error("Supabase is not configured.");
-  const results=await Promise.all([
-    sb.from("portal_users").upsert(db.users.map(u=>({id:u.id,name:u.name,role:u.role,dept:u.dept,password_hash:u.pw}))),
-    sb.from("portal_tasks").upsert(db.tasks.map(t=>({id:t.id,title:t.title,dept:t.dept,assignee_id:t.as,due:t.due,status:t.status,priority:t.pri}))),
-    sb.from("portal_outputs").upsert(db.outs.map(o=>({id:o.id,dept:o.dept,title:o.title,target:o.target,current_value:o.cur}))),
-    sb.from("portal_posts").upsert(db.posts.map(p=>({id:p.id,by_user_id:p.by,dept:p.dept,title:p.title,body:p.body,ts:new Date(p.ts).toISOString()})))
-  ]);
-  const failure=results.find(result=>result.error);
-  if(failure) throw failure.error;
+// Write only the row each action changed. Upserting the whole dataset needs
+// UPDATE policies on every table (upsert = INSERT ... ON CONFLICT DO UPDATE),
+// which the demo schema does not grant for users/posts.
+const run=async(make,msg)=>{
+  try{
+    const {error}=await make();
+    if(error) throw error;
+    return true;
+  }catch(e){
+    console.error("Supabase save error",e);
+    S.msg=msg||"Could not save to Supabase. Check connection and table policies.";
+    try{await loadRemote()}catch{}
+    return false;
+  }
 };
-const saveChanges=async()=>{try{await save();return true}catch(e){console.error("Supabase save error",e);S.msg="Could not save to Supabase. Check connection and table policies.";try{await loadRemote()}catch{}return false}};
+const rowUser=u=>({id:u.id,name:u.name,role:u.role,dept:u.dept,password_hash:u.pw});
+const rowTask=t=>({id:t.id,title:t.title,dept:t.dept,assignee_id:t.as,due:t.due,status:t.status,priority:t.pri});
+const rowPost=p=>({id:p.id,by_user_id:p.by,dept:p.dept,title:p.title,body:p.body,ts:new Date(p.ts).toISOString()});
+const write={
+  userAdd:u=>run(()=>sb.from("portal_users").insert(rowUser(u)),"Could not save the new member to Supabase."),
+  taskAdd:t=>run(()=>sb.from("portal_tasks").insert(rowTask(t))),
+  taskSet:t=>run(()=>sb.from("portal_tasks").update(rowTask(t)).eq("id",t.id)),
+  postAdd:p=>run(()=>sb.from("portal_posts").insert(rowPost(p))),
+  postDel:id=>run(()=>sb.from("portal_posts").delete().eq("id",id))
+};
 const loadRemote=async()=>{
   if(!sb) throw new Error("Supabase URL and publishable key are required.");
   const [u,t,o,p]=await Promise.all([
@@ -116,21 +129,21 @@ if(k==="login"){
   if(x&&String(x.pw||"").toLowerCase()===hp){S.user=x;S.view="dash"}
   else S.msg="Invalid user ID or password.";
 }
-if(k==="task"&&u?.role!=="member"){const a=db.users.find(x=>x.id===d.as&&x.role==="member");if(a&&(u.role==="admin"||a.dept===u.dept)){db.tasks.push({id:Date.now(),title:d.title.trim().slice(0,120),dept:a.dept,as:a.id,due:d.due,status:"todo",pri:d.pri});await saveChanges()}}
-if(k==="post"&&u&&d.title.trim()&&d.body.trim()){db.posts.push({id:Date.now(),by:u.id,dept:u.dept,title:d.title.trim().slice(0,100),body:d.body.trim().slice(0,3000),ts:Date.now()});await saveChanges()}
+if(k==="task"&&u?.role!=="member"){const a=db.users.find(x=>x.id===d.as&&x.role==="member");if(a&&(u.role==="admin"||a.dept===u.dept)){const t={id:Date.now(),title:d.title.trim().slice(0,120),dept:a.dept,as:a.id,due:d.due,status:"todo",pri:d.pri};db.tasks.push(t);await write.taskAdd(t)}}
+if(k==="post"&&u&&d.title.trim()&&d.body.trim()){const p={id:Date.now(),by:u.id,dept:u.dept,title:d.title.trim().slice(0,100),body:d.body.trim().slice(0,3000),ts:Date.now()};db.posts.push(p);await write.postAdd(p)}
 if(k==="member"&&u&&u.role!=="member"){const dept=u.role==="admin"?d.dept:u.dept,id=d.id.trim();
-if(!/^[a-z0-9._]{3,20}$/.test(id)||!D.includes(dept))S.msg="Invalid ID or department.";else if(db.users.some(x=>String(x.id).toLowerCase()===id.toLowerCase()))S.msg="That User ID already exists.";else{db.users.push({id,name:d.name.trim().slice(0,60),role:"member",dept,pw:await hashPassword(d.pw)});await saveChanges()}}
+if(!/^[a-z0-9._]{3,20}$/.test(id)||!D.includes(dept))S.msg="Invalid ID or department.";else if(db.users.some(x=>String(x.id).toLowerCase()===id.toLowerCase()))S.msg="That User ID already exists.";else{const nu={id,name:d.name.trim().slice(0,60),role:"member",dept,pw:await hashPassword(d.pw)};db.users.push(nu);await write.userAdd(nu)}}
 app()});
 document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]");if(!b||b.tagName==="SELECT"||b.tagName==="INPUT")return;const a=b.dataset.a,u=S.user;S.msg="";
 if(a==="retry"){await connectRemote();return}
 if(a==="nav")S.view=b.dataset.v;
 if(a==="out2"){S.user=null}
-if(a==="mv"){const t=db.tasks.find(t=>t.id==b.dataset.id),s=b.dataset.s;if(t&&(t.as===u.id||u.role==="admin"||(u.role==="head"&&t.dept===u.dept))&&(s!=="done"||u.role!=="member")){t.status=s;await saveChanges()}}
-if(a==="delpost"){const p=db.posts.find(p=>p.id==b.dataset.id);if(p&&(p.by===u.id||u.role==="admin")){db.posts=db.posts.filter(x=>x!==p);await saveChanges()}}
+if(a==="mv"){const t=db.tasks.find(t=>t.id==b.dataset.id),s=b.dataset.s;if(t&&(t.as===u.id||u.role==="admin"||(u.role==="head"&&t.dept===u.dept))&&(s!=="done"||u.role!=="member")){t.status=s;await write.taskSet(t)}}
+if(a==="delpost"){const p=db.posts.find(p=>p.id==b.dataset.id);if(p&&(p.by===u.id||u.role==="admin")){db.posts=db.posts.filter(x=>x!==p);await write.postDel(p.id)}}
 if(a==="copy"){try{await navigator.clipboard.writeText(S.rep);document.getElementById("cm").textContent="Copied."}catch(x){document.getElementById("cm").textContent="Copy blocked by browser."}return}
 app()});
 document.addEventListener("change",async e=>{const el=e.target,u=S.user;if(!u)return;let changed=false;
-if(el.dataset.a==="assign"){const t=db.tasks.find(t=>t.id==el.dataset.id),m=db.users.find(x=>x.id===el.value);if(t&&m&&m.dept===t.dept&&(u.role==="admin"||u.dept===t.dept)){t.as=m.id;await saveChanges();changed=true}}
+if(el.dataset.a==="assign"){const t=db.tasks.find(t=>t.id==el.dataset.id),m=db.users.find(x=>x.id===el.value);if(t&&m&&m.dept===t.dept&&(u.role==="admin"||u.dept===t.dept)){t.as=m.id;await write.taskSet(t);changed=true}}
 if(changed)app()});
 connectRemote();
 </script></body></html>
