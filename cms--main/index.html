@@ -41,7 +41,7 @@ const LOGO="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAWgAAAECCAIAAABc6Nq+AA
 const D=["Creative","Vice President 1","Vice President 2","PR & Relations","Administration","Student Relations"];
 const day=n=>new Date(Date.now()+n*864e5).toISOString().slice(0,10),today=day(0);
 const SL={todo:"To Do",prog:"In Progress",review:"In Review",done:"Done"};
-let db={users:[],tasks:[],outs:[],posts:[]};
+let db={users:[],tasks:[],outs:[],posts:[],metrics:[]};
 let S={user:null,view:"dash",msg:"",rep:"",ready:false,connectionError:false};
 // Write only the row each action changed. Upserting the whole dataset needs
 // UPDATE policies on every table (upsert = INSERT ... ON CONFLICT DO UPDATE),
@@ -71,26 +71,50 @@ const write={
 const loadRemote=async()=>{
   if(!sb) throw new Error("Supabase URL and publishable key are required.");
   const [u,t,o,p]=await Promise.all([
-    sb.from("portal_users").select("id,name,role,dept,password_hash"),
+    sb.from("portal_users").select("id,name,role,dept"),
     sb.from("portal_tasks").select("id,title,dept,assignee_id,due,status,priority"),
     sb.from("portal_outputs").select("id,dept,title,target,current_value"),
     sb.from("portal_posts").select("id,by_user_id,dept,title,body,ts")
   ]);
   const failure=[u,t,o,p].find(result=>result.error);
   if(failure) throw failure.error;
+  // auth_id / password_hash / portal_metrics exist only after the security
+  // migration: tolerate their absence so both database states keep working.
+  const authIds={},pwHashes={},metrics=[];
+  const a=await sb.from("portal_users").select("id,auth_id");
+  if(!a.error&&a.data)a.data.forEach(x=>{if(x.auth_id)authIds[x.id]=x.auth_id});
+  const h=await sb.from("portal_users").select("id,password_hash");
+  if(!h.error&&h.data)h.data.forEach(x=>{pwHashes[x.id]=x.password_hash});
+  const m=await sb.from("portal_metrics").select("dept,total,completed");
+  if(!m.error&&m.data)m.data.forEach(x=>metrics.push(x));
   db={
-    users:(u.data||[]).map(x=>({id:x.id,name:x.name,role:x.role,dept:x.dept,pw:x.password_hash})),
+    users:(u.data||[]).map(x=>({id:x.id,name:x.name,role:x.role,dept:x.dept,authId:authIds[x.id]||null,pw:pwHashes[x.id]||null})),
     tasks:(t.data||[]).map(x=>({id:x.id,title:x.title,dept:x.dept,as:x.assignee_id,due:x.due,status:x.status,pri:x.priority})),
     outs:(o.data||[]).map(x=>({id:x.id,dept:x.dept,title:x.title,target:x.target,cur:x.current_value})),
-    posts:(p.data||[]).map(x=>({id:x.id,by:x.by_user_id,dept:x.dept,title:x.title,body:x.body,ts:new Date(x.ts).getTime()}))
+    posts:(p.data||[]).map(x=>({id:x.id,by:x.by_user_id,dept:x.dept,title:x.title,body:x.body,ts:new Date(x.ts).getTime()})),
+    metrics
   };
 };
-const connectRemote=async()=>{S.ready=false;S.connectionError=false;S.msg="Connecting to Supabase...";app();try{await loadRemote();S.msg=""}catch(e){console.error("Supabase load error",e);S.connectionError=true;S.msg="Could not load Supabase data. Check URL, key and table policies."}S.ready=true;app()};
+const connectRemote=async()=>{
+  S.ready=false;S.connectionError=false;S.msg="";app();
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(session){
+      await loadRemote();
+      S.user=db.users.find(x=>x.authId===session.user.id)||null;
+      if(!S.user) await sb.auth.signOut();
+    }else{
+      S.user=null;
+      try{await loadRemote()}catch(e){/* pre-login read: blocked after the security migration, fine */}
+    }
+  }catch(e){console.error("Supabase load error",e);S.connectionError=true;S.msg="Could not load Supabase data. Check connection."}
+  S.ready=true;app();
+};
 const me=id=>db.users.find(u=>u.id===id)||{name:"(removed)",dept:""};
 const mem=d=>db.users.filter(x=>x.role==="member"&&x.dept===d);
 const vis=()=>{const u=S.user;return db.tasks.filter(t=>u.role==="admin"||(u.role==="head"?t.dept===u.dept:t.as===u.id))};
 const pct=a=>a.length?Math.round(a.filter(t=>t.status==="done").length*100/a.length):0;
-const deliverables=d=>{const tasks=db.tasks.filter(t=>t.dept===d);return {completed:tasks.filter(t=>t.status==="done").length,total:tasks.length}};
+const deliverables=d=>{const m=db.metrics.find(m=>m.dept===d);if(m)return{completed:m.completed,total:m.total};const tasks=db.tasks.filter(t=>t.dept===d);return {completed:tasks.filter(t=>t.status==="done").length,total:tasks.length}};
 const od=t=>t.status!=="done"&&t.due<today;
 const roleOf=u=>u.role==="admin"?"Admin":u.role==="head"?"Head, "+u.dept:"Member, "+u.dept;
 function login(){return `<div class="lg"><img src="${LOGO}" alt="E-Cell"><h2 style="color:var(--b1);margin:6px 0">Techtrix 2026</h2><p class="mut">Sign in with your user ID.</p><div class="c"><form data-f="login"><input name="id" placeholder="User ID" autocomplete="username" required><input name="pw" type="password" placeholder="Password" autocomplete="current-password" required><div class="err">${esc(S.msg)}</div><button class="p">Sign in</button></form></div></div>`}
@@ -118,26 +142,36 @@ const rows=mem(d).map(m=>{const x=dl.filter(t=>t.as===m.id),f=db.posts.filter(p=
 tx+=`  Key deliverables completed: ${output.completed}/${output.total} tasks\n`;
 return `<div class="c sc"><b>${esc(d)}</b> <span class="mut">${pct(dl)}% complete</span><table><tr><th>Member</th><th>Assigned</th><th>Done</th><th>Overdue</th><th>Posts</th></tr>${rows||"<tr><td colspan=5>No members</td></tr>"}</table></div>`}).join("");S.rep=tx;
 return `<div class="row"><button class="p" data-a="copy">Copy report text</button><span class="mut" id="cm"></span></div>`+body}
-function app(){const u=S.user,A=document.getElementById("app");if(S.connectionError){A.innerHTML=`<main class="lg"><h2>Supabase connection required</h2><p class="err">${esc(S.msg)}</p><button class="p" data-a="retry">Retry connection</button></main>`;return}if(!S.ready){A.innerHTML=`<main class="lg"><p class="mut">${esc(S.msg||"Connecting to Supabase...")}</p></main>`;return}if(!u){A.innerHTML=login();return}
+function app(){const u=S.user,A=document.getElementById("app");if(S.connectionError){A.innerHTML=`<main class="lg"><h2>Supabase connection required</h2><p class="err">${esc(S.msg)}</p><button class="p" data-a="retry">Retry connection</button></main>`;return}if(!S.ready){A.innerHTML=`<main class="lg"><img src="${LOGO}" alt="" style="width:64px;opacity:.4"></main>`;return}if(!u){A.innerHTML=login();return}
 const tabs=u.role==="member"?[["dash","My Portal"],["post","Daily Feedback"]]:[["dash","Dashboard"],["tasks","Tasks"],["post","Feedback"],["team","Team"],["rep","Report"]];
 if(!tabs.some(t=>t[0]===S.view))S.view="dash";
 const v={dash:dashV,tasks:tasksV,post:postV,team:teamV,rep:repV}[S.view]();
 A.innerHTML=`<header><img src="${LOGO}" alt="E-Cell"><b>Techtrix 2026</b>${tabs.map(([k,n])=>`<button data-a="nav" data-v="${k}" class="${S.view===k?"on":""}">${n}</button>`).join("")}<button data-a="out2">Sign out</button></header><main><p class="mut">Welcome, <b>${esc(u.name)}</b> (${esc(roleOf(u))})</p>${v}</main>`}
 document.addEventListener("submit",async e=>{e.preventDefault();const f=e.target,d=Object.fromEntries(new FormData(f)),u=S.user,k=f.dataset.f;S.msg="";
 if(k==="login"){
-  const id=String(d.id||"").trim().toLowerCase(),x=db.users.find(x=>String(x.id).trim().toLowerCase()===id),hp=await hashPassword(d.pw);
-  if(x&&String(x.pw||"").toLowerCase()===hp){S.user=x;S.view="dash"}
-  else S.msg="Invalid user ID or password.";
+  const id=String(d.id||"").trim().toLowerCase(),pw=String(d.pw||"");
+  const r=await sb.auth.signInWithPassword({email:id+"@techtrix.local",password:pw}).catch(()=>({data:null,error:{message:"auth unavailable"}}));
+  if(r.data&&!r.error){
+    try{await loadRemote();S.user=db.users.find(x=>x.authId===r.data.user.id)||null}
+    catch(e){console.error("Supabase load error",e);S.user=null}
+    if(S.user)S.view="dash";
+    else{await sb.auth.signOut();S.msg="Account not linked to a portal member."}
+  }else{
+    if(!db.users.length){try{await loadRemote()}catch{}}
+    const x=db.users.find(x=>String(x.id).trim().toLowerCase()===id),hp=await hashPassword(pw);
+    if(x&&String(x.pw||"").toLowerCase()===hp){S.user=x;S.view="dash"}
+    else S.msg="Invalid user ID or password.";
+  }
 }
 if(k==="task"&&u?.role!=="member"){const a=db.users.find(x=>x.id===d.as&&x.role==="member");if(a&&(u.role==="admin"||a.dept===u.dept)){const t={id:Date.now(),title:d.title.trim().slice(0,120),dept:a.dept,as:a.id,due:d.due,status:"todo",pri:d.pri};db.tasks.push(t);await write.taskAdd(t)}}
 if(k==="post"&&u&&d.title.trim()&&d.body.trim()){const p={id:Date.now(),by:u.id,dept:u.dept,title:d.title.trim().slice(0,100),body:d.body.trim().slice(0,3000),ts:Date.now()};db.posts.push(p);await write.postAdd(p)}
 if(k==="member"&&u&&u.role!=="member"){const dept=u.role==="admin"?d.dept:u.dept,id=d.id.trim();
-if(!/^[a-z0-9._]{3,20}$/.test(id)||!D.includes(dept))S.msg="Invalid ID or department.";else if(db.users.some(x=>String(x.id).toLowerCase()===id.toLowerCase()))S.msg="That User ID already exists.";else{const nu={id,name:d.name.trim().slice(0,60),role:"member",dept,pw:await hashPassword(d.pw)};db.users.push(nu);await write.userAdd(nu)}}
+if(!/^[a-z0-9._]{3,20}$/.test(id)||!D.includes(dept))S.msg="Invalid ID or department.";else if(db.users.some(x=>String(x.id).toLowerCase()===id.toLowerCase()))S.msg="That User ID already exists.";else{const nu={id,name:d.name.trim().slice(0,60),role:"member",dept,pw:await hashPassword(d.pw)};const {error}=await sb.rpc("create_member",{p_id:id,p_name:nu.name,p_pw:String(d.pw||""),p_dept:dept});if(!error)db.users.push({id,name:nu.name,role:"member",dept});else if(/does not exist|not found/i.test(error.message||"")){db.users.push(nu);await write.userAdd(nu)}else{console.error("Supabase create member error",error);S.msg="Could not create member: "+(error.message||"unknown error")}}}
 app()});
 document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]");if(!b||b.tagName==="SELECT"||b.tagName==="INPUT")return;const a=b.dataset.a,u=S.user;S.msg="";
 if(a==="retry"){await connectRemote();return}
 if(a==="nav")S.view=b.dataset.v;
-if(a==="out2"){S.user=null}
+if(a==="out2"){await sb.auth.signOut();S.user=null}
 if(a==="mv"){const t=db.tasks.find(t=>t.id==b.dataset.id),s=b.dataset.s;if(t&&(t.as===u.id||u.role==="admin"||(u.role==="head"&&t.dept===u.dept))&&(s!=="done"||u.role!=="member")){t.status=s;await write.taskSet(t)}}
 if(a==="delpost"){const p=db.posts.find(p=>p.id==b.dataset.id);if(p&&(p.by===u.id||u.role==="admin")){db.posts=db.posts.filter(x=>x!==p);await write.postDel(p.id)}}
 if(a==="copy"){try{await navigator.clipboard.writeText(S.rep);document.getElementById("cm").textContent="Copied."}catch(x){document.getElementById("cm").textContent="Copy blocked by browser."}return}
