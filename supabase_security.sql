@@ -287,3 +287,7 @@ create view portal_metrics with (security_invoker = on) as
 
 revoke all on portal_metrics from anon;
 grant select on portal_metrics to authenticated;
+
+-- Make PostgREST reload its schema cache immediately, so create_member is
+-- callable from the portal right away instead of after a cache refresh delay.
+notify pgrst, 'reload schema';
